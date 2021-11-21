@@ -1,0 +1,117 @@
+use tokio::io::{BufReader, AsyncBufReadExt};
+use tokio::fs::File;
+use tokio::task;
+
+use governor::{Quota, RateLimiter};
+use nonzero::nonzero;
+
+use std::env;
+use std::error::Error;
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+
+use hyper::{Client, Body};
+use hyper::client::HttpConnector;
+use hyper_rustls::ConfigBuilderExt;
+use hyper::client::connect::dns::GaiResolver;
+use rustls::{ClientConfig, Certificate, RootCertStore, OwnedTrustAnchor};
+use rustls::client::{ServerCertVerified, ServerCertVerifier, ServerName};
+
+struct SkipCertificationVerification;
+
+impl ServerCertVerifier for SkipCertificationVerification {
+    fn verify_server_cert(
+	&self,
+        end_entity: &Certificate,
+	intermediates: &[Certificate],
+	server_name: &ServerName,
+	scts: &mut dyn Iterator<Item = &[u8]>,
+	ocsp_response: &[u8],
+	now: SystemTime,
+    ) -> Result<ServerCertVerified, rustls::TLSError> {
+	Ok(ServerCertVerified::assertion())
+    }
+}
+
+async fn testurl(client: Client<HttpsConnector<HttpConnector<GaiResolver>>>, pb: ProgressBar, url: String) {
+    //no certs
+    tracing::trace!("sending request");
+    pb.inc(1);
+    let resp = match client.get(format!("{}/AirWatch", url)).await {
+	Ok(resp) => match resp.text().await {
+	    Ok(txt) => txt,
+	    Err(_) => return
+	},
+	Err(_) => return
+    };
+
+    tracing::trace!("checking response");
+    if resp.contains("/AirWatch/Login") {
+        pb.inc_length(1);
+	println!("{}", url);
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+
+    console_subscriber::init();
+
+    let args: Vec<String> = env::args().collect();
+    let filename = &args[1];
+
+    let mut http = HttpConnector::new_with_resolver(GaiResolver::new());
+    http.enforce_http(false);
+    let mut root_store = RootCertStore::empty();
+    root_store.add_server_trust_anchors(
+	webpki_roots::TLS_SERVER_ROOTS
+	    .0
+	    .iter()
+	    .map(|ta| {
+		OwnedTrustAnchor::from_subject_spki_name_constraints(
+		    ta.subject,
+		    ta.spki,
+		    ta.name_constraints,
+		)
+	    }),
+	    );
+    let tls = ClientConfig::builder()
+	.with_safe_defaults()
+	.with_root_certificates(root_store)
+	.with_no_client_auth();
+    tls.dangerous().set_certificate_verifier(Arc::new(SkipCertificationVerification {}));
+
+    let https = HttpsConnectorBuilder::new()
+	.with_tls_config(tls)
+	.https_or_http()
+	.enable_http1()
+	.build();
+    let client = Client::builder().build(https);
+
+    //rate limit
+    let lim = RateLimiter::direct(Quota::per_second(nonzero!(10000u32)));
+
+    //open file
+    let file = match File::open(filename).await {
+	Ok(file) => file,
+	Err(e) => panic!("Failed to open file {}: {:?}", filename, e)
+    };
+    let mut lines = BufReader::new(file).lines();
+    let pb = ProgressBar::new(0);
+    pb.set_draw_target(ProgressDrawTarget::stderr());
+    pb.set_style(ProgressStyle::default_bar()
+		 .template("{spinner:.green} {elapsed} ({len}) {pos} {per_sec}")
+		 .progress_chars("#>-"));
+
+    Ok(while let Some(line) = lines.next_line().await? {
+	//request from url on line
+	tracing::trace!("waiting for rate limit");
+	lim.until_ready().await;
+	tracing::trace!("spawning task");
+	let client = client.clone();
+	let pb = pb.clone();
+	task::spawn(async move { testurl(client, pb, line).await; });
+    })
+}

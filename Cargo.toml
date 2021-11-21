@@ -1,0 +1,25 @@
+[package]
+name = "airwatcher"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+governor = "*"
+tokio = { version = "^1.13", features = ["full"] }
+tokio-stream = { version = "*", features = ["io-util"] }
+futures = "*"
+futures-util = "*"
+async-std = "*"
+nonzero = "*"
+nonzero_ext = "*"
+console-subscriber = { git = "https://github.com/tokio-rs/console", branch = "main" }
+tracing-core = "0.1.18"
+tracing = "0.1.26"
+indicatif = "*"
+rustls = { version = "*", features = ["dangerous_configuration"] }
+hyper = "*"
+hyper-rustls = { git = "https://github.com/rustls/hyper-rustls", branch = "main", features = ["webpki-tokio", "http1", "http2", "tls12", "logging"] }
+webpki-roots = "*"
+spmc = "*"
