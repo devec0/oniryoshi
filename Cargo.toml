@@ -1,5 +1,5 @@
 [package]
-name = "airwatcher"
+name = "oniryoshi"
 version = "0.1.0"
 edition = "2021"
 
@@ -18,9 +18,10 @@ console-subscriber = { git = "https://github.com/tokio-rs/console", branch = "ma
 tracing-core = "0.1.18"
 tracing = "0.1.26"
 indicatif = "*"
-reqwest = "*"
+reqwest = { version = "*", features = ["native-tls"] }
 rustls = { version = "*", features = ["dangerous_configuration"] }
 hyper = "*"
 hyper-rustls = { git = "https://github.com/rustls/hyper-rustls", branch = "main", features = ["webpki-tokio", "http1", "http2", "tls12", "logging"] }
 webpki-roots = "*"
 spmc = "*"
+clap = "*"
